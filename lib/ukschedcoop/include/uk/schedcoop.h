@@ -44,8 +44,48 @@
 extern "C" {
 #endif
 
+struct schedcoop_private {
+	struct uk_thread_list thread_list;
+	struct uk_thread_list sleeping_threads;
+
+#if CONFIG_LIBFLEXOS_VMEPT
+	struct uk_thread *vmept_rpc_server;
+	uint8_t vmept_rpc_server_queued;
+	int runqueue_status;
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+};
+
+
+
 struct uk_sched *uk_schedcoop_init(struct uk_alloc *a);
 
+#if CONFIG_LIBFLEXOS_VMEPT
+void uk_schedcoop_set_rpc_server(struct uk_sched *s, struct uk_thread *rpc_server);
+void uk_schedcoop_queue_rpc_server(struct uk_sched *s);
+
+
+static inline int uk_schedcoop_runqueue_status(struct uk_sched *s)
+{
+	struct schedcoop_private *prv = (struct schedcoop_private*) s->prv;
+	return prv->runqueue_status;
+}
+
+/* Indicates an empty runqueue. */
+#define UK_SCHEDCOOP_RUNQ_EMPTY 		0
+
+/* Indicates that the runqueue only contains the RPC server.  */
+#define UK_SCHEDCOOP_RUNQ_RPC_SERVER_ONLY	1
+
+/* Indicates that the runqueue contains the RPC server at the front but
+ * also other threads. */
+#define UK_SCHEDCOOP_RUNQ_RPC_SERVER_FIRST	2
+
+/* Indicates that the head of the runqueue is some other thread. */
+#define UK_SCHEDCOOP_RUNQ_NORMAL_FIRST		3
+int uk_schedcoop_check_runqueue(struct uk_sched *s);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+
+void uk_schedcoop_rpc_yield(struct uk_sched *s);
 #ifdef __cplusplus
 }
 #endif

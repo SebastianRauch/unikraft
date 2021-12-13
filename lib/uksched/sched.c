@@ -45,6 +45,11 @@
 #include <uk/uk_signal.h>
 #endif
 
+#if CONFIG_LIBFLEXOS_VMEPT
+#include <flexos/impl/bitfield.h>
+struct flexos_vmept_bitfield256 free_tids;
+#endif
+
 struct uk_sched *uk_sched_head;
 
 /* TODO FLEXOS: for now we share the TLS. This is not optimal
@@ -64,6 +69,11 @@ struct uk_sched *uk_sched_default_init(struct uk_alloc *a)
 	s = uk_schedcoop_init(a);
 #endif
 
+
+#if CONFIG_LIBFLEXOS_VMEPT
+	/* a set bit indicates a free thread ID */
+	flexos_vmept_setall_256(&free_tids);
+#endif
 	return s;
 }
 
@@ -290,6 +300,18 @@ struct uk_thread *uk_sched_thread_create_main(struct uk_sched *sched,
 		goto err;
 	}
 
+#if CONFIG_LIBFLEXOS_VMEPT
+	int tid = flexos_vmept_first_one_256(&free_tids);
+	int rpc_index = flexos_vmept_rpc_index(flexos_vmept_comp_id, (uint8_t) tid);
+	if (tid < 0) {
+		uk_pr_err("Failed to assign tid.\n");
+		goto err;
+	}
+	flexos_vmept_clear_bit_256(&free_tids, (uint8_t) tid);
+	thread->tid = tid;
+	thread->rpc_index = rpc_index;
+#endif
+
 	ALLOC_COMP_STACK(stack, COMP0_PKUKEY);
 
 	/* __FLEXOS MARKER__: insert stack allocations here. */
@@ -343,6 +365,18 @@ struct uk_thread *uk_sched_thread_create(struct uk_sched *sched,
 		goto err;
 	}
 
+#if CONFIG_LIBFLEXOS_VMEPT
+	int tid = flexos_vmept_first_one_256(&free_tids);
+	int rpc_index = flexos_vmept_rpc_index(flexos_vmept_comp_id, (uint8_t) tid);
+	if (tid < 0) {
+		uk_pr_err("Failed to assign tid.\n");
+		goto err;
+	}
+	flexos_vmept_clear_bit_256(&free_tids, (uint8_t) tid);
+	thread->tid = tid;
+	thread->rpc_index = rpc_index;
+#endif
+
 	ALLOC_COMP_STACK(stack, COMP0_PKUKEY);
 
 	/* __FLEXOS MARKER__: insert stack allocations here. */
@@ -356,21 +390,6 @@ struct uk_thread *uk_sched_thread_create(struct uk_sched *sched,
 			tls, function, arg);
 	if (rc)
 		goto err;
-
-#if CONFIG_LIBFLEXOS_VMEPT
-	/* here we need to create an rpc thread in each other compartment */
-	// TODO: error handling
-	printf("Spawning rpc threads in other compartments.\n");
-	volatile struct flexos_vmept_rpc_ctrl * ctrl = flexos_vmept_rpc_ctrl(flexos_vmept_comp_id, thread->tid);
-	flexos_vmept_init_rpc_ctrl(ctrl);
-	thread->ctrl = ctrl;
-	for (size_t i = 0; i < FLEXOS_VMEPT_COMP_COUNT; ++i) {
-		if (i == flexos_vmept_comp_id)
-			continue;
-		flexos_vmept_master_rpc_call_create(flexos_vmept_comp_id, i, thread->tid);
-	}
-	printf("Spawned rpc threads in other compartments.\n");
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 	rc = uk_sched_thread_add(sched, thread, attr);
 	if (rc)
@@ -395,74 +414,6 @@ err:
 
 	return NULL;
 }
-
-#if CONFIG_LIBFLEXOS_VMEPT
-struct uk_thread *uk_sched_thread_create_rpc_only(struct uk_sched *sched,
-		const char *name, const uk_thread_attr_t *attr,
-		void (*function)(void *), void *arg,
-		uint8_t normal_thread_comp_id, uint8_t normal_thread_tid,
-		volatile struct flexos_vmept_thread_map *thread_map)
-{
-	volatile struct uk_thread *thread = NULL;
-	void *stack = NULL;
-	int rc;
-	void *tls = NULL;
-
-	thread = uk_malloc(sched->allocator, sizeof(struct uk_thread));
-	if (thread == NULL) {
-		flexos_gate(libc, uk_pr_err, "Failed to allocate thread\n");
-		goto err;
-	}
-
-	ALLOC_COMP_STACK(stack, COMP0_PKUKEY);
-
-	/* __FLEXOS MARKER__: insert stack allocations here. */
-
-	if (have_tls_area() && !(tls = uk_thread_tls_create(flexos_shared_alloc)))
-		goto err;
-
-	rc = uk_thread_init(thread,
-			&sched->plat_ctx_cbs, sched->allocator,
-			name, stack /* __FLEXOS MARKER__: uk_thread_init call */,
-			tls, function, arg);
-	if (rc)
-		goto err;
-
-	// for rpc only threads set tid to -1
-	// FIXME: maybe change with proper tid allocation?
-	thread->tid = -1;
-	/* thread_map = NULL is used when creating the thread for the master rpc loop
-	 * we don't set ctrl or the mapping for that thread */
-	if (thread_map) {
-		thread->ctrl = flexos_vmept_rpc_ctrl(normal_thread_comp_id, normal_thread_tid);
-		flexos_vmept_thread_map_put(thread_map, normal_thread_comp_id,
-			 (uint8_t) normal_thread_tid, thread);
-	}
-	rc = uk_sched_thread_add(sched, thread, attr);
-	if (rc)
-		goto err_add;
-
-	return thread;
-
-err_add:
-	uk_thread_fini(thread, sched->allocator);
-err:
-	if (tls)
-		uk_free(flexos_shared_alloc, tls);
-	if (stack)
-		uk_free(sched->allocator, stack);
-#if CONFIG_LIBFLEXOS_INTELPKU
-	/* TODO FLEXOS free() per-compartment stacks */
-	/* Clearly, not doing it now should not be much of an issue because
-	 * this error case is unlikely to happen in our benchmarks... */
-#endif /* CONFIG_LIBFLEXOS_INTELPKU */
-	if (thread)
-		uk_free(sched->allocator, thread);
-
-	return NULL;
-}
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
-
 
 void uk_sched_thread_destroy(struct uk_sched *sched, struct uk_thread *thread)
 {
@@ -479,44 +430,14 @@ void uk_sched_thread_destroy(struct uk_sched *sched, struct uk_thread *thread)
 	/* TODO FLEXOS free() per-compartment stacks */
 #endif /* CONFIG_LIBFLEXOS_INTELPKU */
 #if CONFIG_LIBFLEXOS_VMEPT
-	/* here we need to detroy the associated rpc thread in each other compartment */
-	// TODO: error handling
-	for (size_t i = 0; i < FLEXOS_VMEPT_COMP_COUNT; ++i) {
-		if (i == flexos_vmept_comp_id)
-			continue;
-		flexos_vmept_master_rpc_call_destroy(flexos_vmept_comp_id, i, thread->tid);
+	if (thread->tid >= 0) {
+		flexos_vmept_set_bit_256(&free_tids, (uint8_t) thread->tid);
 	}
 #endif /* CONFIG_LIBFLEXOS_VMEPT */
 	if (thread->tls)
 		uk_free(flexos_shared_alloc, thread->tls);
 	uk_free(sched->allocator, thread);
 }
-
-
-#if CONFIG_LIBFLEXOS_VMEPT
-void uk_sched_thread_destroy_rpc_only(struct uk_sched *sched, struct uk_thread *thread,
-	uint8_t normal_thread_comp_id, uint8_t normal_thread_tid,
-	volatile struct flexos_vmept_thread_map *thread_map)
-{
-	UK_ASSERT(sched != NULL);
-	UK_ASSERT(thread != NULL);
-	UK_ASSERT(thread->stack != NULL);
-	UK_ASSERT(!have_tls_area() || thread->tls != NULL);
-	UK_ASSERT(is_exited(thread));
-
-	UK_TAILQ_REMOVE(&sched->exited_threads, thread, thread_list);
-	uk_thread_fini(thread, sched->allocator);
-	uk_free(sched->allocator, thread->stack);
-
-	if (thread->tls)
-		uk_free(flexos_shared_alloc, thread->tls);
-	uk_free(sched->allocator, thread);
-	if (thread_map) {
-		flexos_vmept_thread_map_put(thread_map, normal_thread_comp_id,
-			(uint8_t) normal_thread_tid, NULL);
-	}
-}
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 void uk_sched_thread_kill(struct uk_sched *sched, struct uk_thread *thread)
 {

@@ -73,10 +73,16 @@ struct uk_thread {
 #endif /* CONFIG_LIBFLEXOS_INTELPKU */
 #if CONFIG_LIBFLEXOS_VMEPT
 	/* a tid in [0, 255] indicates normal thread
-	 * a tid of -1 indicates rpc thread */
+	 * a negative tid indicates an RPC thread */
 	int tid;
-	/* used to identify the rpc control data this rpc thread listens to */
-	void* ctrl;
+
+	/* the RPC index is used in RPC calls */
+	int rpc_index;
+
+	/* for RPC threads this temporarily holds the compartment that made the call this thread is handling */
+	uint8_t calling_comp;
+
+	uint8_t is_rpc_thread;
 #endif /* CONFIG_LIBFLEXOS_VMEPT */
 #ifdef CONFIG_LIBNEWLIBC
 	struct _reent *reent;

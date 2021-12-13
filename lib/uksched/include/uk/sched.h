@@ -258,31 +258,11 @@ struct uk_thread *uk_sched_thread_create(struct uk_sched *sched,
 		const char *name, const uk_thread_attr_t *attr,
 		void (*function)(void *), void *arg);
 
-#if CONFIG_LIBFLEXOS_VMEPT
-/* This doesn't create other threads in other compartments.
- * A theread created via this function can't initiate RPC calls,
- * but it can make RPC calls in response to received RPC calls. */
-struct uk_thread *uk_sched_thread_create_rpc_only(struct uk_sched *sched,
-		const char *name, const uk_thread_attr_t *attr,
-		void (*function)(void *), void *arg,
-		uint8_t normal_thread_comp_id, uint8_t normal_thread_tid,
-		volatile struct flexos_vmept_thread_map *thread_map);
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
-
 struct uk_thread *uk_sched_thread_create_main(struct uk_sched *sched,
 		const uk_thread_attr_t *attr,
 		void (*function)(void *), void *arg);
 void uk_sched_thread_destroy(struct uk_sched *sched,
 		struct uk_thread *thread);
-
-#if CONFIG_LIBFLEXOS_VMEPT
-/* This doesn't destroy  threads in other compartments.
- * Only for use on rpc threads. */
-void uk_sched_thread_destroy_rpc_only(struct uk_sched *sched,
-		struct uk_thread *thread,
-		uint8_t normal_thread_comp_id, uint8_t normal_thread_tid,
-		volatile struct flexos_vmept_thread_map *thread_map);
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 void uk_sched_thread_kill(struct uk_sched *sched,
 		struct uk_thread *thread);

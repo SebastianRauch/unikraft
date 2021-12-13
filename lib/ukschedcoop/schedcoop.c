@@ -36,23 +36,60 @@
 #include <uk/sched.h>
 #include <uk/schedcoop.h>
 
-struct schedcoop_private {
-	struct uk_thread_list thread_list;
-	struct uk_thread_list sleeping_threads;
-};
 
+// TODO remove
+#define SCHED_DEBUG
 #ifdef SCHED_DEBUG
 static void print_runqueue(struct uk_sched *s)
 {
-	struct schedcoop_private *prv = s->private;
+	struct schedcoop_private *prv = s->prv;
 	struct uk_thread *th;
 
 	UK_TAILQ_FOREACH(th, &prv->thread_list, thread_list) {
-		flexos_gate(libc, uk_pr_debug, "   Thread \"%s\", runnable=%d\n",
-			    th->name, is_runnable(th));
+		flexos_gate(libc, uk_pr_debug, "   Thread \"%p\", runnable=%d\n",
+			    th, is_runnable(th));
 	}
 }
 #endif
+
+#if CONFIG_LIBFLEXOS_VMEPT
+/* Must only be called from the RPC server thread. */
+void uk_schedcoop_set_rpc_server(struct uk_sched *s, struct uk_thread *rpc_server)
+{
+	struct schedcoop_private *prv = s->prv;
+	prv->vmept_rpc_server = rpc_server;
+
+	/* The RPC server calls this, thus it is the current
+	* thread and not in the rrun queue. */
+	prv->vmept_rpc_server_queued = 0;
+}
+
+void uk_schedcoop_queue_rpc_server(struct uk_sched *s)
+{
+	struct schedcoop_private *prv = s->prv;
+	UK_ASSERT(prv->vmept_rpc_server);
+	UK_ASSERT(!prv->vmept_rpc_server_queued);
+
+	UK_TAILQ_INSERT_TAIL(&prv->thread_list, prv->vmept_rpc_server, thread_list);
+	prv->vmept_rpc_server_queued = 1;
+}
+
+static inline void update_runqueue_status(struct schedcoop_private *prv)
+{
+	struct uk_thread *first = UK_TAILQ_FIRST(&prv->thread_list);
+	if (first == NULL) {
+		prv->runqueue_status = UK_SCHEDCOOP_RUNQ_EMPTY;
+	} else if (first == prv->vmept_rpc_server) {
+		if (UK_TAILQ_NEXT(first, thread_list) == NULL) {
+			prv->runqueue_status = UK_SCHEDCOOP_RUNQ_RPC_SERVER_ONLY;
+		} else {
+			prv->runqueue_status = UK_SCHEDCOOP_RUNQ_RPC_SERVER_FIRST;
+		}
+	} else {
+		prv->runqueue_status = UK_SCHEDCOOP_RUNQ_NORMAL_FIRST;
+	}
+}
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 static void schedcoop_schedule(struct uk_sched *s)
 {
@@ -99,20 +136,51 @@ static void schedcoop_schedule(struct uk_sched *s)
 			UK_ASSERT(!is_exited(next));
 			UK_TAILQ_REMOVE(&prv->thread_list, next,
 					thread_list);
+
+#if CONFIG_LIBFLEXOS_VMEPT
+			struct uk_thread *rpc_server = prv->vmept_rpc_server;
+			if (next == rpc_server) {
+				prv->vmept_rpc_server_queued = 0;
+			}
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+
 			/* Put previous thread on the end of the list */
-			if (is_runnable(prev))
-				UK_TAILQ_INSERT_TAIL(&prv->thread_list, prev,
+			if (is_runnable(prev)) {
+#if CONFIG_LIBFLEXOS_VMEPT
+				if (prev == rpc_server) {
+					if (!prv->vmept_rpc_server_queued) {
+						UK_TAILQ_INSERT_TAIL(&prv->thread_list, prev,
+							thread_list);
+						prv->vmept_rpc_server_queued = 1;
+					}
+				} else if (!prev->is_rpc_thread) {
+					UK_TAILQ_INSERT_TAIL(&prv->thread_list, prev,
 						thread_list);
-			else
+				}
+#else
+				UK_TAILQ_INSERT_TAIL(&prv->thread_list, prev,
+					thread_list);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+			} else {
 				set_queueable(prev);
+			}
 			clear_queueable(next);
 			ukplat_stack_set_current_thread(next);
+
+#if CONFIG_LIBFLEXOS_VMEPT
+			update_runqueue_status(prv);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+
 			break;
 		} else if (is_runnable(prev)) {
 			next = prev;
+
+#if CONFIG_LIBFLEXOS_VMEPT
+			prv->runqueue_status = UK_SCHEDCOOP_RUNQ_EMPTY;
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+
 			break;
 		}
-
 		/* block until the next timeout expires, or for 10 secs,
 		 * whichever comes first
 		 */
@@ -122,7 +190,6 @@ static void schedcoop_schedule(struct uk_sched *s)
 		ukplat_lcpu_irqs_handle_pending();
 
 	} while (1);
-
 	ukplat_lcpu_restore_irqf(flags);
 
 	/* Interrupting the switch is equivalent to having the next thread
@@ -153,6 +220,10 @@ static int schedcoop_thread_add(struct uk_sched *s, struct uk_thread *t,
 	UK_TAILQ_INSERT_TAIL(&prv->thread_list, t, thread_list);
 	ukplat_lcpu_restore_irqf(flags);
 
+#if CONFIG_LIBFLEXOS_VMEPT
+	update_runqueue_status(prv);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+
 	return 0;
 }
 
@@ -180,6 +251,10 @@ static void schedcoop_thread_remove(struct uk_sched *s, struct uk_thread *t)
 		schedcoop_schedule(s);
 		flexos_gate(libc, uk_pr_warn, "schedule() returned! Trying again\n");
 	}
+
+#if CONFIG_LIBFLEXOS_VMEPT
+	update_runqueue_status(prv);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
 }
 
 static void schedcoop_thread_blocked(struct uk_sched *s, struct uk_thread *t)
@@ -192,6 +267,10 @@ static void schedcoop_thread_blocked(struct uk_sched *s, struct uk_thread *t)
 		UK_TAILQ_REMOVE(&prv->thread_list, t, thread_list);
 	if (t->wakeup_time > 0)
 		UK_TAILQ_INSERT_TAIL(&prv->sleeping_threads, t, thread_list);
+
+#if CONFIG_LIBFLEXOS_VMEPT
+	update_runqueue_status(prv);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
 }
 
 static void schedcoop_thread_woken(struct uk_sched *s, struct uk_thread *t)
@@ -206,6 +285,10 @@ static void schedcoop_thread_woken(struct uk_sched *s, struct uk_thread *t)
 		UK_TAILQ_INSERT_TAIL(&prv->thread_list, t, thread_list);
 		clear_queueable(t);
 	}
+
+#if CONFIG_LIBFLEXOS_VMEPT
+	update_runqueue_status(prv);
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
 }
 
 /* FIXME FLEXOS this is not really a libc callback */
@@ -234,8 +317,25 @@ static void idle_thread_fn(void *unused) {
 
 static void schedcoop_yield(struct uk_sched *s)
 {
+#if CONFIG_LIBFLEXOS_VMEPT
+	struct uk_thread *current = uk_thread_current();
+	int was_rpc = current->is_rpc_thread;
+	current->is_rpc_thread = 0;
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+	schedcoop_schedule(s);
+#if CONFIG_LIBFLEXOS_VMEPT
+	current->is_rpc_thread = was_rpc;
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
+}
+
+
+#if CONFIG_LIBFLEXOS_VMEPT
+/* Only for use by RPC threads. */
+void uk_schedcoop_rpc_yield(struct uk_sched *s)
+{
 	schedcoop_schedule(s);
 }
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 struct uk_sched *uk_schedcoop_init(struct uk_alloc *a)
 {
@@ -252,9 +352,16 @@ struct uk_sched *uk_schedcoop_init(struct uk_alloc *a)
 
 	ukplat_ctx_callbacks_init(&sched->plat_ctx_cbs, ukplat_ctx_sw);
 
+
 	prv = sched->prv;
 	UK_TAILQ_INIT(&prv->thread_list);
 	UK_TAILQ_INIT(&prv->sleeping_threads);
+
+#if CONFIG_LIBFLEXOS_VMEPT
+	prv->vmept_rpc_server = NULL;
+	prv->vmept_rpc_server_queued = 0;
+	prv->runqueue_status = UK_SCHEDCOOP_RUNQ_EMPTY;
+#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 	uk_sched_idle_init(sched, NULL, idle_thread_fn);
 

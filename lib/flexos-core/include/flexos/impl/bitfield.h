@@ -33,20 +33,69 @@
 
 #include <stdint.h>
 
-/* a bitfield containing 256 bits */
-struct flexos_vmept_bitfield_256 {
-	uint64_t eightbytes[4]; 
+/* set FLEXOS_VMEPT_BITFIELD_BUILTIN to 1 to use gcc __builtin_ffs functions for bit search */
+#ifndef FLEXOS_VMEPT_BITFIELD_BUILTIN
+#define FLEXOS_VMEPT_BITFIELD_BUILTIN 1
+#endif
+
+/* a bitfield containing 64 bits */
+struct flexos_vmept_bitfield64 {
+	uint64_t bits;
 };
 
-/* returns the smalles integer i such that eightbytes & (1 << i) == 0
- * or -1 if eightbytes is 0  
- * TODO: maybe use specific instructions to do this faster? */
-static inline int _flexos_vmept_find_first_zero_bit_64(uint64_t eightbytes) {
-	/* x & (x - 1) clears the rightmost set bit 
-	 * thus x - (x & (x - 1)) only keeps the righmost set bit (if any) */
-	uint64_t x = ~eightbytes;
-	x = x - (x & (x - 1));
-	
+/* a bitfield containing 256 bits */
+struct flexos_vmept_bitfield256 {
+	struct flexos_vmept_bitfield64 bfs[4];
+};
+
+static inline void flexos_vmept_clear_bit_64(struct flexos_vmept_bitfield64 *bf, uint8_t i) __attribute__((always_inline));
+static inline void flexos_vmept_set_bit_64(struct flexos_vmept_bitfield64 *bf, uint8_t i) __attribute__((always_inline));
+static inline void flexos_vmept_clearall_64(struct flexos_vmept_bitfield64 *bf) __attribute__((always_inline));
+static inline void flexos_vmept_setall_64(struct flexos_vmept_bitfield64 *bf) __attribute__((always_inline));
+
+static inline int flexos_vmept_get_bit_64(const struct flexos_vmept_bitfield64 *bf, uint8_t i) __attribute__((always_inline));
+static inline int flexos_vmept_first_one_64(const struct flexos_vmept_bitfield64 *bf) __attribute__((always_inline));
+static inline int flexos_vmept_first_one_ex_64(const struct flexos_vmept_bitfield64 *bf, uint8_t start) __attribute__((always_inline));
+
+/* doesn't use GCC bultin ffs */
+static inline int _flexos_vmept_first_one_64(uint64_t bits);
+
+static inline void flexos_vmept_clear_bit_256(struct flexos_vmept_bitfield256 *bf, uint8_t i) __attribute__((always_inline));
+static inline void flexos_vmept_set_bit_256(struct flexos_vmept_bitfield256 *bf, uint8_t i) __attribute__((always_inline));
+static inline void flexos_vmept_clearall_256(struct flexos_vmept_bitfield256 *bf) __attribute__((always_inline));
+static inline void flexos_vmept_setall_256(struct flexos_vmept_bitfield256 *bf) __attribute__((always_inline));
+
+static inline int flexos_vmept_get_bit_256(const struct flexos_vmept_bitfield256 *bf, uint8_t i) __attribute__((always_inline));
+static inline int flexos_vmept_first_one_256(const struct flexos_vmept_bitfield256 *bf) __attribute__((always_inline));
+
+static inline void flexos_vmept_clear_bit_64(struct flexos_vmept_bitfield64 *bf, uint8_t i)
+{
+	bf->bits &= ~(((uint64_t) 1) << i);
+}
+
+static inline void flexos_vmept_set_bit_64(struct flexos_vmept_bitfield64 *bf, uint8_t i)
+{
+	bf->bits |= ((uint64_t) 1) << i;
+}
+
+static inline void flexos_vmept_clearall_64(struct flexos_vmept_bitfield64 *bf)
+{
+	bf->bits = 0;
+}
+
+static inline void flexos_vmept_setall_64(struct flexos_vmept_bitfield64 *bf)
+{
+	bf->bits = 0xffffffffffffffff;
+}
+
+static inline int flexos_vmept_get_bit_64(const struct flexos_vmept_bitfield64 *bf, uint8_t i)
+{
+	return (bf->bits >> i) & 0x01;
+}
+
+static inline int _flexos_vmept_first_one_64(uint64_t bits)
+{
+	uint64_t x = bits - (bits & (bits - 1)); // keeps only most significant one bit
 	switch (x) {
 		case (1ULL << 0): return 0;
 		case (1ULL << 1): return 1;
@@ -116,36 +165,73 @@ static inline int _flexos_vmept_find_first_zero_bit_64(uint64_t eightbytes) {
 	}
 }
 
-static inline int flexos_vmept_has_zero_bit_256(const struct flexos_vmept_bitfield_256 *bf_256) {
-	return (~bf_256->eightbytes[0]) || (~bf_256->eightbytes[1]) 
-		|| (~bf_256->eightbytes[2]) || (~bf_256->eightbytes[3]);
+/* Returns the index of the first set bit or -1 if there is no such bit */
+static inline int flexos_vmept_first_one_64(const struct flexos_vmept_bitfield64 *bf)
+{
+#if FLEXOS_VMEPT_BITFIELD_BUILTIN
+	return __builtin_ffsl(bf->bits) - 1;
+#else
+	return _flexos_vmept_first_one_64(bf->bits);
+#endif /* FLEXOS_VMEPT_BITFIELD_BUILTIN */
 }
 
-static inline int flexos_vmept_find_first_zero_bit_256(const struct flexos_vmept_bitfield_256 *bf_256) {
-	if (~bf_256->eightbytes[0]) 
-		return _flexos_vmept_find_first_zero_bit_64(bf_256->eightbytes[0]);
-	if (~bf_256->eightbytes[1]) 
-		return 64 + _flexos_vmept_find_first_zero_bit_64(bf_256->eightbytes[1]);
-	if (~bf_256->eightbytes[2]) 
-		return 128 + _flexos_vmept_find_first_zero_bit_64(bf_256->eightbytes[2]);
-	if (~bf_256->eightbytes[3]) 
-		return 192 + _flexos_vmept_find_first_zero_bit_64(bf_256->eightbytes[3]);
-	return -1;
+/* Returns the index of the first set bit where the search starts at the index given by @start or -1 if there is no such bit.
+ * After the search reaches the end of the bitfield, it start from the beginning and continues up to index (@start - 1)
+ * @start must be in [0, 63], otherwise the behaviour is undefined */
+static inline int flexos_vmept_first_one_ex_64(const struct flexos_vmept_bitfield64 *bf, uint8_t start)
+{
+	uint64_t rotated_bits = (bf->bits << start) | (bf->bits >> (64 - start));
+#if FLEXOS_VMEPT_BITFIELD_BUILTIN
+	return __builtin_ffsl(rotated_bits) - 1;
+#else
+	return _flexos_vmept_first_one_64(rotated_bits);
+#endif /* FLEXOS_VMEPT_BITFIELD_BUILTIN */
 }
 
-static inline void flexos_vmept_set_bit_256(struct flexos_vmept_bitfield_256 *bf_256, uint8_t i) {
-	bf_256->eightbytes[i / 64] |= 1ULL << (i % 64);
+static inline void flexos_vmept_clear_bit_256(struct flexos_vmept_bitfield256 *bf, uint8_t i)
+{
+	flexos_vmept_clear_bit_64(&(bf->bfs[i >> 6]), i & 0x3f);
 }
 
-static inline void flexos_vmept_clear_bit_256(struct flexos_vmept_bitfield_256 *bf_256, uint8_t i) {
-	bf_256->eightbytes[i / 64] &= ~(1ULL << (i % 64));
+static inline void flexos_vmept_set_bit_256(struct flexos_vmept_bitfield256 *bf, uint8_t i)
+{
+	flexos_vmept_set_bit_64(&(bf->bfs[i >> 6]), i & 0x3f);
 }
 
-static inline void flexos_vmept_init_bitfield_256(struct flexos_vmept_bitfield_256 *bf_256) {
-	bf_256->eightbytes[0] = 0ULL;
-	bf_256->eightbytes[1] = 0ULL;
-	bf_256->eightbytes[2] = 0ULL;
-	bf_256->eightbytes[3] = 0ULL;
+static inline void flexos_vmept_clearall_256(struct flexos_vmept_bitfield256 *bf)
+{
+	flexos_vmept_clearall_64(&(bf->bfs[0]));
+	flexos_vmept_clearall_64(&(bf->bfs[1]));
+	flexos_vmept_clearall_64(&(bf->bfs[2]));
+	flexos_vmept_clearall_64(&(bf->bfs[3]));
 }
 
+static inline void flexos_vmept_setall_256(struct flexos_vmept_bitfield256 *bf)
+{
+	flexos_vmept_setall_64(&(bf->bfs[0]));
+	flexos_vmept_setall_64(&(bf->bfs[1]));
+	flexos_vmept_setall_64(&(bf->bfs[2]));
+	flexos_vmept_setall_64(&(bf->bfs[3]));
+}
+
+
+static inline int flexos_vmept_get_bit_256(const struct flexos_vmept_bitfield256 *bf, uint8_t i)
+{
+	return flexos_vmept_get_bit_64(&bf->bfs[i >> 6], i & 0x3f);
+}
+
+static inline int flexos_vmept_first_one_256(const struct flexos_vmept_bitfield256 *bf)
+{
+	if (bf->bfs[0].bits) {
+		return flexos_vmept_first_one_64(&bf->bfs[0]);
+	} else if (bf->bfs[1].bits) {
+		return 64 + flexos_vmept_first_one_64(&bf->bfs[1]);
+	} else if (bf->bfs[2].bits) {
+		return 128 + flexos_vmept_first_one_64(&bf->bfs[2]);
+	} else if (bf->bfs[3].bits) {
+		return 192 + flexos_vmept_first_one_64(&bf->bfs[3]);
+	} else {
+		return -1;
+	}
+}
 #endif /* FLEXOS_VMEPT_BITFIELD_H */

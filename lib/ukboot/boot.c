@@ -115,30 +115,7 @@ static void main_thread_func(void *arg)
 #endif /* CONFIG_LIBFLEXOS_INTELPKU */
 
 #if CONFIG_LIBFLEXOS_VMEPT
-	// FIXME: if the compiler optimizes this, it might break funtion pointers across compartments!
-	if (FLEXOS_VMEPT_COMP_ID == FLEXOS_VMEPT_APPCOMP) {
-		/* IMPORTANT: the app compartment initializes relevant parts of shared memory
-		 * therefore it must always be started first. */
-		flexos_vmept_init_master_rpc_ctrls();
-
-		/* here we need to create an rpc thread in each other compartment */
-		// TODO: error handling
-		printf("Spawning rpc threads in other compartments (from main thread).\n");
-
-		struct uk_thread *thread = uk_thread_current();
-		struct flexos_vmept_rpc_ctrl *ctrl = flexos_vmept_rpc_ctrl(FLEXOS_VMEPT_COMP_ID, thread->tid);
-		flexos_vmept_init_rpc_ctrl(ctrl);
-		thread->ctrl = ctrl;
-
-		for (size_t i = 0; i < FLEXOS_VMEPT_COMP_COUNT; ++i) {
-			if (i == FLEXOS_VMEPT_COMP_ID)
-				continue;
-			printf("Creating rpc thread in compartment %d. Own compartment is %d.\n", i, FLEXOS_VMEPT_COMP_ID);
-			flexos_vmept_master_rpc_call_create(FLEXOS_VMEPT_COMP_ID, i, thread->tid);
-		}
-
-		printf("Spawned rpc threads in other compartments (from main thread).\n");
-	}
+	flexos_vmept_init();
 #endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 	int i;
@@ -233,6 +210,7 @@ void ukplat_entry_argp(char *arg0, char *argb, __sz argb_len)
 	}
 	ukplat_entry(argc, argv);
 }
+
 
 void *md_base __section(".data_shared");
 /* defined in <uk/plat.h> */
@@ -434,23 +412,54 @@ do {									\
 	for (unsigned long page = shmem_addr; page < shmem_addr + size; page += PAGE_SIZE)
 		uk_page_map(page, page, PAGE_PROT_READ | PAGE_PROT_WRITE, 0);
 
-	for (size_t i = 0; i < FLEXOS_VMEPT_RPC_PAGES_SIZE; i += PAGE_SIZE) {
-		unsigned long page = FLEXOS_VMEPT_RPC_PAGES_ADDR + i;
 
+	/* Set up mapping for the message queues and the init barrier.
+	 * This memory area is shared between all compartments, thus a simple linea
+	 * mapping is sufficient. */
+	unsigned long shmem_linear_start = FLEXOS_VMEPT_MSGQUEUE_AREA_START;
+	unsigned long shmem_linear_size = FLEXOS_VMEPT_ROUND_UP((FLEXOS_VMEPT_MSGQUEUE_AREA_SIZE) + (FLEXOS_VMEPT_INIT_BARRIER_SIZE), PAGE_SIZE);
+	uk_pr_info("mapping linear: virt[%p, %p] to phys[%p, %p]\n", shmem_linear_start, shmem_linear_start + shmem_linear_size - 1,
+		shmem_linear_start, shmem_linear_start + shmem_linear_size - 1);
+	for (size_t i = 0; i < shmem_linear_size; i += PAGE_SIZE) {
+		unsigned long page = shmem_linear_start + i;
 		uk_page_map(page, page, PAGE_PROT_READ | PAGE_PROT_WRITE, 0);
 	}
 
-/* TODO FLEXOS: this only works for 2 compartments, generate automatically for more */
-#if CONFIG_LIBFLEXOS_VMEPT
-	// FIXME: if the compiler optimizes this, it might break funtion pointers across compartments!
-	#if FLEXOS_VMEPT_COMP_ID == 0
-		flexos_shared_alloc = uk_allocbbuddy_init((void *) shmem_addr, size / 2);
-	#elif FLEXOS_VMEPT_COMP_ID == 1
-		flexos_shared_alloc = uk_allocbbuddy_init((void *) (shmem_addr + size / 2), size / 2);
+	/* Set up the mapping for pairwise sharing of the RPC control structures. */
+
+	unsigned long phys_rpc_area_start = FLEXOS_VMEPT_RPC_CTRL_AREA_START;
+	unsigned long virt_rpc_area_start = FLEXOS_VMEPT_RPC_CTRL_AREA_START;
+	for (size_t other_comp = 0; other_comp < FLEXOS_VMEPT_COMP_COUNT; ++other_comp) {
+		if (other_comp == flexos_vmept_comp_id || !flexos_vmept_map_ctrl_chunk(other_comp)) {
+			continue;
+		}
+		unsigned int virt_chunk_index = other_comp;
+		unsigned long virt_chunk_start = virt_rpc_area_start + other_comp * FLEXOS_VMEPT_RPC_CTRL_CHUNK_SIZE;
+		unsigned int phys_chunk_index = flexos_vmept_rpc_ctrl_chunk_index(flexos_vmept_comp_id, other_comp);
+		unsigned long phys_chunk_start = phys_rpc_area_start + phys_chunk_index * FLEXOS_VMEPT_RPC_CTRL_CHUNK_SIZE;
+		uk_pr_info("mapping chunk: virt[%p, %p] to phys[%p, %p]\n", virt_chunk_start, virt_chunk_start + FLEXOS_VMEPT_RPC_CTRL_CHUNK_SIZE - 1,
+			phys_chunk_start, phys_chunk_start + FLEXOS_VMEPT_RPC_CTRL_CHUNK_SIZE - 1);
+		for (size_t i = 0; i < FLEXOS_VMEPT_RPC_CTRL_CHUNK_SIZE; i += PAGE_SIZE) {
+			unsigned long virt_page = virt_chunk_start + i;
+			unsigned long phys_page = phys_chunk_start + i;
+			uk_page_map(virt_page, phys_page, PAGE_PROT_READ | PAGE_PROT_WRITE, 0);
+		}
+	}
+
+
+/*
+	for (size_t i = 0; i < FLEXOS_VMEPT_RPC_PAGES_SIZE; i += PAGE_SIZE) {
+		unsigned long page = FLEXOS_VMEPT_RPC_PAGES_ADDR + i;
+		uk_page_map(page, page, PAGE_PROT_READ | PAGE_PROT_WRITE, 0);
+	}
+*/
+
+	#if FLEXOS_VMEPT_COMP_ID < FLEXOS_VMEPT_MAX_COMPS
+		flexos_shared_alloc = uk_allocbbuddy_init((void *) (shmem_addr + (FLEXOS_VMEPT_COMP_ID) * (FLEXOS_VMEPT_SHARED_HEAP_PER_COMP)),
+			FLEXOS_VMEPT_SHARED_HEAP_PER_COMP);
 	#else
-		#error "This only works for two compartments!"
+		#error "More than 16 compartments are not supported!"
 	#endif
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
 
 #else
 	/* make shared heap point to the default heap for compatibility

@@ -162,11 +162,6 @@ int uk_thread_init_main(struct uk_thread *thread,
 #if CONFIG_LIBFLEXOS_INTELPKU
 	thread->tid = uk_num_threads++;
 #endif /* CONFIG_LIBFLEXOS_INTELPKU */
-#if CONFIG_LIBFLEXOS_VMEPT
-	// FIXME: do this properly, this is terrible
-	thread->tid = uk_num_threads++;
-	thread->ctrl = NULL;
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
 	SETUP_STACK(stack, 0, function, arg, sp);
 
 	/* The toolchain is going to insert a number of calls to
@@ -236,12 +231,6 @@ int uk_thread_init(struct uk_thread *thread,
 	unsigned long pkru = rdpkru();
 	wrpkru(0x0);
 #endif /* CONFIG_LIBFLEXOS_INTELPKU */
-#if CONFIG_LIBFLEXOS_VMEPT
-	// FIXME: do this properly, this is terrible
-	thread->tid = uk_num_threads++;
-	thread->ctrl = NULL;
-#endif /* CONFIG_LIBFLEXOS_VMEPT */
-
 	SETUP_STACK(stack, 0, function, arg, sp);
 
 	/* The toolchain is going to insert a number of calls to
@@ -274,11 +263,8 @@ int uk_thread_init(struct uk_thread *thread,
 	thread->prv = NULL;
 
 	// FIXME
-#if CONFIG_LIBFLEXOS_VMEPT
+	//thread->reent = flexos_malloc_whitelist(sizeof(struct _reent), libc);
 	thread->reent = malloc(sizeof(struct _reent));
-#else
-	thread->reent = flexos_malloc_whitelist(sizeof(struct _reent), libc);
-#endif
 	if (!thread->reent) {
 		flexos_gate(libukdebug, uk_pr_crit, FLEXOS_SHARED_LITERAL(
 				"Could not allocate reent!"));
