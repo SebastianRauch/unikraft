@@ -20,8 +20,48 @@ config LIBFLEXOS_VMEPT
 	select PT_API
 
 if LIBFLEXOS_VMEPT
-config LIBFLEXOS_VMEPT_LIBRARY
-	bool "Build a library compartment (not main app)"
+choice
+	prompt "Max threads"
+	default LIBFLEXOS_VMEPT_MAX_THREADS_256
+	help
+	  Set the maximum number of threads per compartment.
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_256
+	bool "256"
+	help
+	  Support up to 256 threads per compartment
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_128
+	bool "128"
+	help
+	  Support up to 128 threads per compartment
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_64
+	bool "64"
+	help
+	  Support up to 64 threads per compartment
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_32
+	bool "32"
+	help
+	  Support up to 32 threads per compartment
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_16
+	bool "16"
+	help
+	  Support up to 16 threads per compartment
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_8
+	bool "8"
+	help
+	  Support up to 8 threads per compartment
+
+config LIBFLEXOS_VMEPT_MAX_THREADS_4
+	bool "4"
+	help
+	  Support up to 4 threads per compartment
+
+endchoice
 endif # LIBFLEXOS_VMEPT
 
 config LIBFLEXOS_NONE
