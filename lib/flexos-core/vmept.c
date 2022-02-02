@@ -438,17 +438,8 @@ void *flexos_vmept_rpc_server_loop(void *arg __unused)
 static inline __attribute__((always_inline)) void tmp_rpc_server_loop(struct uk_thread *current_thread, int rpc_index)
 {
 	volatile struct flexos_vmept_msgqueue *own_msgqueue = flexos_vmept_get_own_msgqueue();
-	int runq_status = uk_schedcoop_runqueue_status(current_thread->sched);
-	int busy_wait = (runq_status == UK_SCHEDCOOP_RUNQ_RPC_SERVER_ONLY) | (runq_status == UK_SCHEDCOOP_RUNQ_EMPTY);
-
 	struct flexos_vmept_msg msg;
-	if (busy_wait) {
-		flexos_vmept_msgqueue_get_blocking(own_msgqueue, &msg);
-	} else if (!flexos_vmept_msgqueue_get(own_msgqueue, &msg)) {
-		uk_schedcoop_rpc_yield(current_thread->sched);
-		/* must only resume this thread when there was a message for this RPC index */
-		return;
-	}
+	flexos_vmept_msgqueue_get_blocking(own_msgqueue, &msg);
 
 	int msg_rpc_index = flexos_vmept_extract_rpc_index(msg.rpc_index);
 	if (msg_rpc_index != rpc_index) {
