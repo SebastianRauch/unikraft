@@ -500,6 +500,7 @@ uint64_t flexos_vmept_execute_rpc(volatile struct flexos_vmept_rpc_ctrl *ctrl,
 
 #define flexos_vmept_gate0(key_from, key_to, func)								\
 do {														\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -511,6 +512,7 @@ do {														\
 
 #define flexos_vmept_gate0_r(key_from, key_to, retval, func)							\
 do {														\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -522,7 +524,7 @@ do {														\
 
 #define flexos_vmept_gate1(key_from, key_to, func, arg1)							\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -535,7 +537,7 @@ do {														\
 
 #define flexos_vmept_gate1_r(key_from, key_to, retval, func, arg1)						\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -548,8 +550,7 @@ do {														\
 
 #define flexos_vmept_gate2(key_from, key_to, func, arg1, arg2)							\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -562,8 +563,7 @@ do {														\
 
 #define flexos_vmept_gate2_r(key_from, key_to, retval, func, arg1, arg2)					\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -576,9 +576,7 @@ do {														\
 
 #define flexos_vmept_gate3(key_from, key_to, func, arg1, arg2, arg3)						\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -592,9 +590,7 @@ do {														\
 
 #define flexos_vmept_gate3_r(key_from, key_to, retval, func, arg1, arg2, arg3)					\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -608,10 +604,6 @@ do {														\
 
 #define flexos_vmept_gate4(key_from, key_to, func, arg1, arg2, arg3, arg4)					\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg4));						\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -625,10 +617,6 @@ do {														\
 
 #define flexos_vmept_gate4_r(key_from, key_to, retval, func, arg1, arg2, arg3, arg4)				\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg4));						\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -642,11 +630,7 @@ do {														\
 
 #define flexos_vmept_gate5(key_from, key_to, func, arg1, arg2, arg3, arg4, arg5)				\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg4));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg5));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -660,11 +644,7 @@ do {														\
 
 #define flexos_vmept_gate5_r(key_from, key_to, retval, func, arg1, arg2, arg3, arg4, arg5)			\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg4));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg5));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -678,12 +658,7 @@ do {														\
 
 #define flexos_vmept_gate6(key_from, key_to, func, arg1, arg2, arg3, arg4, arg5, arg6)				\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg4));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg5));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg6));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
@@ -697,12 +672,7 @@ do {														\
 
 #define flexos_vmept_gate6_r(key_from, key_to, retval, func, arg1, arg2, arg3, arg4, arg5, arg6)		\
 do {														\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg1));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg2));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg3));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg4));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg5));						\
-	UK_CTASSERT(flexos_is_heuristic_typeclass_integer(arg6));						\
+	UK_ASSERT(key_from == flexos_vmept_comp_id);														\
 	struct uk_thread *_gate_thread = uk_thread_current();							\
 	int rpc_index = _gate_thread->rpc_index;								\
 	volatile struct flexos_vmept_rpc_ctrl *_gate_ctrl = flexos_vmept_get_rpc_ctrl(rpc_index, key_to);	\
