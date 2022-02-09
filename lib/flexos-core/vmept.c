@@ -460,6 +460,40 @@ static inline __attribute__((always_inline)) void tmp_rpc_server_loop(struct uk_
 	current_thread->calling_comp = flexos_vmept_extract_other_comp(msg.rpc_index);
 }
 
+static inline __attribute__((always_inline)) void tmp_rpc_server_loop_nb(struct uk_thread *current_thread, int rpc_index)
+{
+	volatile struct flexos_vmept_msgqueue *own_msgqueue = flexos_vmept_get_own_msgqueue();
+	int runq_status = uk_schedcoop_runqueue_status(current_thread->sched);
+	int busy_wait = (runq_status == UK_SCHEDCOOP_RUNQ_RPC_SERVER_ONLY) | (runq_status == UK_SCHEDCOOP_RUNQ_EMPTY);
+
+	struct flexos_vmept_msg msg;
+	if (busy_wait) {
+		flexos_vmept_msgqueue_get_blocking(own_msgqueue, &msg);
+	} else if (!flexos_vmept_msgqueue_get(own_msgqueue, &msg)) {
+		uk_schedcoop_rpc_yield(current_thread->sched);
+		/* must only resume this thread when there was a message for this RPC index */
+		return;
+	}
+
+	int msg_rpc_index = flexos_vmept_extract_rpc_index(msg.rpc_index);
+	if (msg_rpc_index != rpc_index) {
+		struct uk_thread *next = flexos_vmept_assign_rpc_thread(&rpc_thread_mgr, msg_rpc_index)->thread;
+
+		next->calling_comp = flexos_vmept_extract_other_comp(msg.rpc_index);
+		FLEXOS_VMEPT_DEBUG_PRINT_MSGQUEUE(("[tmp_loop] Received RPC message %08x, handling thread %p (current: %p), calling comp: %d.\n",
+			msg.rpc_index, next, current_thread, next->calling_comp));
+
+		uk_sched_thread_switch(current_thread->sched, current_thread, next);
+		/* must only resume this thread when there was a message for this RPC index */
+		return;
+	}
+
+	FLEXOS_VMEPT_DEBUG_PRINT_MSGQUEUE(("[tmp_loop] Received RPC message %08x, handling thread %p (current: %p), calling comp: %d.\n",
+		msg.rpc_index, current_thread, current_thread, flexos_vmept_extract_other_comp(msg.rpc_index)));
+
+	current_thread->calling_comp = flexos_vmept_extract_other_comp(msg.rpc_index);
+}
+
 uint64_t flexos_vmept_execute_rpc(volatile struct flexos_vmept_rpc_ctrl *ctrl,
 	struct uk_thread *current_thread, uint8_t key_from, uint8_t key_to, int rpc_index)
 {
@@ -546,7 +580,7 @@ void *flexos_vmept_rpc_thread_func(void *arg __unused)
 		FLEXOS_VMEPT_DEBUG_PRINT_MSGQUEUE(("[thread_func] Sending return notification, rpc_index %d (from %d) to comp%d, msgq at %p.\n"			, rpc_index, (int) key_to, (int) key_from, other_msgq));
 		flexos_vmept_msgqueue_put(other_msgq, &msg);
 
-		tmp_rpc_server_loop(current_thread, rpc_index);
+		tmp_rpc_server_loop_nb(current_thread, rpc_index);
 	}
 	return NULL;
 }
